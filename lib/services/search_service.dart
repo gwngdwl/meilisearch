@@ -87,16 +87,27 @@ class SearchService {
     final client = HttpClient();
     client.autoUncompress = false; // we set Accept-Encoding: identity, no gzip
     try {
+      print(
+          '[SearchService] Sending search request: query="$query", offset=$offset, limit=$limit, filters=$filters');
       final req = await client
           .postUrl(Uri.parse('$_baseUrl/indexes/$_indexName/search'))
           .timeout(const Duration(seconds: 10));
-      req.headers.set('Content-Type', 'application/json');
+      req.headers.set('Content-Type', 'application/json; charset=utf-8');
       req.headers.set('Accept-Encoding', 'identity'); // no gzip
-      req.write(body);
+      req.add(utf8.encode(body));
 
       final res = await req.close().timeout(const Duration(seconds: 10));
       final responseBody = await utf8.decoder.bind(res).join();
+
+      if (res.statusCode != 200) {
+        print('[SearchService] ERROR: HTTP ${res.statusCode} - $responseBody');
+        throw Exception(
+            'Search failed with status ${res.statusCode}: $responseBody');
+      }
+
       final map = jsonDecode(responseBody) as Map<String, dynamic>;
+      print(
+          '[SearchService] Response OK: estimatedTotalHits=${map['estimatedTotalHits']}, hits=${(map['hits'] as List?)?.length ?? 0}');
 
       final hitsRaw =
           (map['hits'] as List?)?.cast<Map<String, dynamic>>() ?? [];
@@ -115,6 +126,10 @@ class SearchService {
         totalHits: (map['estimatedTotalHits'] as int?) ?? 0,
         facets: SearchFacets(categories: catFacet, books: bookFacet),
       );
+    } catch (e, stackTrace) {
+      print('[SearchService] ERROR during search: $e');
+      print('[SearchService] Stack trace: $stackTrace');
+      rethrow;
     } finally {
       client.close(force: true);
     }
