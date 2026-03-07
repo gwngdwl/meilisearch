@@ -1,7 +1,13 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'config/app_config.dart';
 import 'services/server_service.dart';
+import 'services/search_service.dart';
+import 'services/indexing_service.dart';
 import 'screens/search_screen.dart';
+import 'states/search_state.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,7 +19,27 @@ void main() async {
   };
   FlutterError.onError = (details) => FlutterError.presentError(details);
 
-  runApp(const MyApp());
+  final prefs = await SharedPreferences.getInstance();
+  final config = AppConfig(prefs);
+  final serverService = ServerService();
+  final searchService = SearchService();
+  final indexingService = IndexingService(config);
+
+  runApp(
+    MultiProvider(
+      providers: [
+        Provider<AppConfig>.value(value: config),
+        Provider<ServerService>.value(value: serverService),
+        Provider<SearchService>.value(value: searchService),
+        Provider<IndexingService>.value(value: indexingService),
+        ChangeNotifierProvider(
+          create: (_) =>
+              SearchState(searchService, indexingService)..checkIndexed(),
+        ),
+      ],
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatefulWidget {
@@ -24,13 +50,14 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
-  final ServerService _server = ServerService();
+  late final ServerService _server;
   String _serverStatus = 'מאתחל שרת...';
   bool _serverReady = false;
 
   @override
   void initState() {
     super.initState();
+    _server = context.read<ServerService>();
     WidgetsBinding.instance.addObserver(this);
     _startServer();
   }

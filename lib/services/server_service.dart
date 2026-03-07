@@ -1,15 +1,13 @@
 import 'dart:io';
 import 'package:path/path.dart' as p;
+import '../config/app_config.dart';
 
 class ServerService {
-  static final ServerService _instance = ServerService._internal();
-  factory ServerService() => _instance;
-  ServerService._internal();
+  ServerService();
 
   Process? _process;
-  static const String host = '127.0.0.1';
-  static const int port = 7700;
-  static String get baseUrl => 'http://$host:$port';
+
+  String get baseUrl => AppConfig.meiliUrl;
 
   Future<void> start() async {
     // Check if already running
@@ -27,7 +25,7 @@ class ServerService {
       '--db-path',
       dataDir,
       '--http-addr',
-      '$host:$port',
+      '${AppConfig.serverHost}:${AppConfig.serverPort}',
       '--no-analytics',
     ]);
 

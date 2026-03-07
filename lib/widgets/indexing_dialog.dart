@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'dart:async';
 import '../services/indexing_service.dart';
 
@@ -10,7 +11,7 @@ class IndexingDialog extends StatefulWidget {
 }
 
 class _IndexingDialogState extends State<IndexingDialog> {
-  final IndexingService _service = IndexingService();
+  late final IndexingService _service = context.read<IndexingService>();
   StreamSubscription<IndexingProgress>? _sub;
   double _fraction = 0;
   String _message = 'מתחיל אינדוקס...';

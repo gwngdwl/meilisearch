@@ -3,10 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:sqlite3/sqlite3.dart';
+import '../config/app_config.dart';
 
-const String _indexName = 'seforim';
-const String _meiliUrl = 'http://127.0.0.1:7700';
-const String _dbPath = r'C:\אוצריא\אוצריא\seforim.db';
 const int _batchSize = 500;
 
 class IndexingProgress {
@@ -18,14 +16,17 @@ class IndexingProgress {
 }
 
 class IndexingService {
+  final AppConfig _config;
+  final HttpClient _client = HttpClient()..autoUncompress = false;
+
+  IndexingService(this._config);
+
   /// Returns true if the Meilisearch seforim index has at least one document.
   Future<bool> isIndexed() async {
-    HttpClient? client;
     try {
-      client = HttpClient();
-      client.autoUncompress = true;
-      final req = await client
-          .getUrl(Uri.parse('$_meiliUrl/indexes/$_indexName/stats'))
+      final req = await _client
+          .getUrl(Uri.parse(
+              '${AppConfig.meiliUrl}/indexes/${AppConfig.indexName}/stats'))
           .timeout(const Duration(seconds: 5));
       req.headers.set('Accept-Encoding', 'identity');
       final res = await req.close().timeout(const Duration(seconds: 5));
@@ -38,8 +39,6 @@ class IndexingService {
       return (map['numberOfDocuments'] as int? ?? 0) > 0;
     } catch (_) {
       return false;
-    } finally {
-      client?.close(force: true);
     }
   }
 
@@ -50,11 +49,9 @@ class IndexingService {
     String path, {
     Object? body,
   }) async {
-    final client = HttpClient();
-    client.autoUncompress = false;
     try {
-      final req = await client
-          .openUrl(method, Uri.parse('$_meiliUrl$path'))
+      final req = await _client
+          .openUrl(method, Uri.parse('${AppConfig.meiliUrl}$path'))
           .timeout(const Duration(seconds: 60));
       req.headers.set('Content-Type', 'application/json; charset=utf-8');
       req.headers.set('Accept-Encoding', 'identity');
@@ -69,7 +66,7 @@ class IndexingService {
             'Meilisearch Error [${res.statusCode}] on $method $path: $responseBody');
         throw HttpException(
             'Meilisearch Error [${res.statusCode}]: $responseBody',
-            uri: Uri.parse('$_meiliUrl$path'));
+            uri: Uri.parse('${AppConfig.meiliUrl}$path'));
       }
 
       if (responseBody.isEmpty) return <String, dynamic>{};
@@ -77,8 +74,6 @@ class IndexingService {
     } catch (e, st) {
       debugPrint('Exception in _meiliRequest ($method $path): $e\n$st');
       rethrow;
-    } finally {
-      client.close(force: true);
     }
   }
 
@@ -87,27 +82,28 @@ class IndexingService {
     // ── 1. Configure index settings ──────────────────────────────────────
     yield const IndexingProgress(0, 0, 'מגדיר הגדרות אינדקס...');
     try {
-      await _meiliRequest('PATCH', '/indexes/$_indexName/settings', body: {
-        'searchableAttributes': ['content', 'heRef', 'bookTitle'],
-        'filterableAttributes': [
-          'categoryId',
-          'categoryTitle',
-          'bookId',
-          'bookTitle',
-        ],
-        'sortableAttributes': ['bookId', 'lineIndex'],
-        'displayedAttributes': [
-          'id',
-          'content',
-          'heRef',
-          'lineIndex',
-          'bookId',
-          'bookTitle',
-          'categoryId',
-          'categoryTitle',
-          'authors',
-        ],
-      });
+      await _meiliRequest('PATCH', '/indexes/${AppConfig.indexName}/settings',
+          body: {
+            'searchableAttributes': ['content', 'heRef', 'bookTitle'],
+            'filterableAttributes': [
+              'categoryId',
+              'categoryTitle',
+              'bookId',
+              'bookTitle',
+            ],
+            'sortableAttributes': ['bookId', 'lineIndex'],
+            'displayedAttributes': [
+              'id',
+              'content',
+              'heRef',
+              'lineIndex',
+              'bookId',
+              'bookTitle',
+              'categoryId',
+              'categoryTitle',
+              'authors',
+            ],
+          });
     } on HttpException catch (e) {
       if (!e.message.contains('[404]')) {
         debugPrint('Failed to configure index settings: $e');
@@ -119,11 +115,12 @@ class IndexingService {
     // ── 2. Open the database ─────────────────────────────────────────────
     yield const IndexingProgress(0, 0, 'קורא מסד הנתונים...');
 
-    if (!File(_dbPath).existsSync()) {
-      throw Exception('קובץ מסד הנתונים לא נמצא: $_dbPath');
+    final dbPath = _config.dbPath;
+    if (dbPath == null || !File(dbPath).existsSync()) {
+      throw Exception('נתיב מסד הנתונים אינו מוגדר או לא קיים: $dbPath');
     }
 
-    final db = sqlite3.open(_dbPath, mode: OpenMode.readOnly);
+    final db = sqlite3.open(dbPath, mode: OpenMode.readOnly);
 
     try {
       // Count total lines
@@ -177,7 +174,7 @@ class IndexingService {
         try {
           await _meiliRequest(
             'POST',
-            '/indexes/$_indexName/documents?primaryKey=id',
+            '/indexes/${AppConfig.indexName}/documents?primaryKey=id',
             body: docs,
           );
         } catch (e, st) {

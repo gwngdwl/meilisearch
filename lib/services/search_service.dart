@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import '../config/app_config.dart';
 
 class SearchResult {
   final int id;
@@ -56,8 +57,9 @@ class SearchResponse {
 }
 
 class SearchService {
-  static const String _baseUrl = 'http://127.0.0.1:7700';
-  static const String _indexName = 'seforim';
+  final HttpClient _client = HttpClient()..autoUncompress = false;
+
+  SearchService();
 
   Future<SearchResponse> search(
     String query, {
@@ -85,13 +87,12 @@ class SearchService {
       'highlightPostTag': '##',
     });
 
-    final client = HttpClient();
-    client.autoUncompress = false; // we set Accept-Encoding: identity, no gzip
     try {
       debugPrint(
           '[SearchService] Sending search request: query="$query", offset=$offset, limit=$limit, filters=$filters');
-      final req = await client
-          .postUrl(Uri.parse('$_baseUrl/indexes/$_indexName/search'))
+      final req = await _client
+          .postUrl(Uri.parse(
+              '${AppConfig.meiliUrl}/indexes/${AppConfig.indexName}/search'))
           .timeout(const Duration(seconds: 10));
       req.headers.set('Content-Type', 'application/json; charset=utf-8');
       req.headers.set('Accept-Encoding', 'identity'); // no gzip
@@ -132,8 +133,10 @@ class SearchService {
       debugPrint('[SearchService] ERROR during search: $e');
       debugPrint('[SearchService] Stack trace: $stackTrace');
       rethrow;
-    } finally {
-      client.close(force: true);
     }
+  }
+
+  void dispose() {
+    _client.close(force: true);
   }
 }

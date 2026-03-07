@@ -1,112 +1,45 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:file_picker/file_picker.dart';
+import '../states/search_state.dart';
+import '../config/app_config.dart';
 import '../services/search_service.dart';
-import '../services/indexing_service.dart';
 import '../widgets/indexing_dialog.dart';
 
-class SearchScreen extends StatefulWidget {
+class SearchScreen extends StatelessWidget {
   const SearchScreen({super.key});
 
-  @override
-  State<SearchScreen> createState() => _SearchScreenState();
-}
-
-class _SearchScreenState extends State<SearchScreen> {
-  final SearchService _searchService = SearchService();
-  final IndexingService _indexingService = IndexingService();
-  final TextEditingController _queryController = TextEditingController();
-  Timer? _debounce;
-
-  List<SearchResult> _results = [];
-  int _totalHits = 0;
-  bool _loading = false;
-  bool _indexed = false;
-  bool _checkingIndex = true;
-
-  // Filters
-  String? _selectedCategory;
-  String? _selectedBook;
-  Map<String, int> _categoryFacets = {};
-  Map<String, int> _bookFacets = {};
-
-  int _offset = 0;
-  static const int _limit = 20;
-
-  @override
-  void initState() {
-    super.initState();
-    _checkIndexed();
-  }
-
-  Future<void> _checkIndexed() async {
-    final indexed = await _indexingService.isIndexed();
-    if (mounted) {
-      setState(() {
-        _indexed = indexed;
-        _checkingIndex = false;
-      });
-    }
-    if (indexed) _runSearch();
-  }
-
-  void _onQueryChanged(String value) {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 350), () {
-      _offset = 0;
-      _runSearch();
-    });
-  }
-
-  Future<void> _runSearch() async {
-    if (!_indexed) return;
-    setState(() => _loading = true);
-    try {
-      final response = await _searchService.search(
-        _queryController.text,
-        categoryTitle: _selectedCategory,
-        bookTitle: _selectedBook,
-        limit: _limit,
-        offset: _offset,
-      );
-      if (mounted) {
-        setState(() {
-          _results =
-              _offset == 0 ? response.hits : [..._results, ...response.hits];
-          _totalHits = response.totalHits;
-          _categoryFacets = response.facets.categories;
-          _bookFacets = response.facets.books;
-          _loading = false;
-        });
-      }
-    } catch (e, stackTrace) {
-      debugPrint('[SearchScreen] ERROR in _runSearch: $e');
-      debugPrint('[SearchScreen] Stack trace: $stackTrace');
-      if (mounted) {
-        setState(() => _loading = false);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('שגיאת חיפוש: $e')));
-      }
-    }
-  }
-
-  Future<void> _openIndexingDialog() async {
+  Future<void> _openIndexingDialog(BuildContext context) async {
+    final state = context.read<SearchState>();
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => const IndexingDialog(),
     );
     if (result == true) {
-      setState(() => _indexed = true);
-      _runSearch();
+      state.setIndexed(true);
     }
   }
 
-  @override
-  void dispose() {
-    _debounce?.cancel();
-    _queryController.dispose();
-    super.dispose();
+  Future<void> _pickDatabase(BuildContext context) async {
+    final result = await FilePicker.platform.pickFiles(
+      dialogTitle: 'בחר קובץ מסד נתונים (seforim.db)',
+      type: FileType.custom,
+      allowedExtensions: ['db', 'sqlite', 'sqlite3'],
+    );
+    if (!context.mounted) return;
+    if (result != null && result.files.single.path != null) {
+      final path = result.files.single.path!;
+      final config = context.read<AppConfig>();
+      await config.setDbPath(path);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('נתיב מסד הנתונים עודכן: $path')),
+        );
+        // After db update, let's re-check indexing.
+        context.read<SearchState>().checkIndexed();
+      }
+    }
   }
 
   @override
@@ -118,36 +51,47 @@ class _SearchScreenState extends State<SearchScreen> {
           title: const Text('חיפוש בספרים'),
           actions: [
             IconButton(
+              icon: const Icon(Icons.settings),
+              tooltip: 'בחר מסד נתונים',
+              onPressed: () => _pickDatabase(context),
+            ),
+            IconButton(
               icon: const Icon(Icons.storage),
               tooltip: 'בנה/עדכן אינדקס',
-              onPressed: _openIndexingDialog,
+              onPressed: () => _openIndexingDialog(context),
             ),
           ],
         ),
-        body: _checkingIndex
-            ? const Center(child: CircularProgressIndicator())
-            : Column(
-                children: [
-                  _buildSearchBar(),
-                  if (!_indexed) _buildNoIndexBanner(),
-                  if (_indexed) _buildFiltersRow(),
-                  if (_indexed) _buildResultsCount(),
-                  if (_indexed) Expanded(child: _buildResultsList()),
-                ],
-              ),
+        body: Consumer<SearchState>(
+          builder: (context, state, child) {
+            if (state.checkingIndex) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            return Column(
+              children: [
+                _buildSearchBar(context, state),
+                if (!state.indexed) _buildNoIndexBanner(context),
+                if (state.indexed) _buildFiltersRow(context, state),
+                if (state.indexed) _buildResultsCount(context, state),
+                if (state.indexed)
+                  Expanded(child: _buildResultsList(context, state)),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
 
-  Widget _buildSearchBar() {
+  Widget _buildSearchBar(BuildContext context, SearchState state) {
     return Padding(
       padding: const EdgeInsets.all(12),
       child: TextField(
-        controller: _queryController,
+        controller: state.queryController,
         textDirection: TextDirection.rtl,
         decoration: InputDecoration(
           hintText: 'חפש בטקסט...',
-          prefixIcon: _loading
+          prefixIcon: state.loading
               ? const Padding(
                   padding: EdgeInsets.all(12),
                   child: SizedBox(
@@ -157,46 +101,70 @@ class _SearchScreenState extends State<SearchScreen> {
                   ),
                 )
               : const Icon(Icons.search),
-          suffixIcon: _queryController.text.isNotEmpty
+          suffixIcon: state.queryController.text.isNotEmpty
               ? IconButton(
                   icon: const Icon(Icons.clear),
-                  onPressed: () {
-                    _queryController.clear();
-                    _offset = 0;
-                    _runSearch();
-                  },
+                  onPressed: state.clearQuery,
                 )
               : null,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
           filled: true,
         ),
-        onChanged: _onQueryChanged,
+        onChanged: state.onQueryChanged,
       ),
     );
   }
 
-  Widget _buildNoIndexBanner() {
+  Widget _buildNoIndexBanner(BuildContext context) {
+    final config = context.read<AppConfig>();
+    final bool hasDb = config.dbPath != null;
+
     return Container(
       color: Colors.amber.shade100,
       padding: const EdgeInsets.all(12),
-      child: Row(
+      child: Column(
         children: [
-          const Icon(Icons.info_outline, color: Colors.orange),
-          const SizedBox(width: 8),
-          const Expanded(child: Text('האינדקס עדיין לא נבנה.')),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.build),
-            label: const Text('צור אינדקס'),
-            onPressed: _openIndexingDialog,
+          Row(
+            children: [
+              const Icon(Icons.info_outline, color: Colors.orange),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  hasDb
+                      ? 'האינדקס עדיין לא נבנה. במסד: ${config.dbPath}'
+                      : 'לא נבחר מסד נתונים. אנא בחר קובץ db קודם.',
+                ),
+              ),
+              if (hasDb)
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.build),
+                  label: const Text('צור אינדקס'),
+                  onPressed: () => _openIndexingDialog(context),
+                )
+              else
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.folder_open),
+                  label: const Text('בחר קובץ'),
+                  onPressed: () => _pickDatabase(context),
+                ),
+            ],
           ),
+          if (context.watch<SearchState>().error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'שגיאה: ${context.watch<SearchState>().error}',
+                style: const TextStyle(color: Colors.red),
+              ),
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildFiltersRow() {
-    final categories = _categoryFacets.keys.toList()..sort();
-    final books = _bookFacets.keys.toList()..sort();
+  Widget _buildFiltersRow(BuildContext context, SearchState state) {
+    final categories = state.categoryFacets.keys.toList()..sort();
+    final books = state.bookFacets.keys.toList()..sort();
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -205,7 +173,7 @@ class _SearchScreenState extends State<SearchScreen> {
           Expanded(
             child: DropdownButtonFormField<String>(
               // ignore: deprecated_member_use
-              value: _selectedCategory,
+              value: state.selectedCategory,
               decoration: const InputDecoration(
                 labelText: 'קטגוריה',
                 border: OutlineInputBorder(),
@@ -224,21 +192,14 @@ class _SearchScreenState extends State<SearchScreen> {
                   ),
                 ),
               ],
-              onChanged: (v) {
-                setState(() {
-                  _selectedCategory = v;
-                  _selectedBook = null;
-                  _offset = 0;
-                });
-                _runSearch();
-              },
+              onChanged: state.selectCategory,
             ),
           ),
           const SizedBox(width: 8),
           Expanded(
             child: DropdownButtonFormField<String>(
               // ignore: deprecated_member_use
-              value: _selectedBook,
+              value: state.selectedBook,
               decoration: const InputDecoration(
                 labelText: 'ספר',
                 border: OutlineInputBorder(),
@@ -257,29 +218,16 @@ class _SearchScreenState extends State<SearchScreen> {
                   ),
                 ),
               ],
-              onChanged: (v) {
-                setState(() {
-                  _selectedBook = v;
-                  _offset = 0;
-                });
-                _runSearch();
-              },
+              onChanged: state.selectBook,
             ),
           ),
-          if (_selectedCategory != null || _selectedBook != null)
+          if (state.selectedCategory != null || state.selectedBook != null)
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: IconButton(
                 icon: const Icon(Icons.filter_alt_off),
                 tooltip: 'נקה פילטרים',
-                onPressed: () {
-                  setState(() {
-                    _selectedCategory = null;
-                    _selectedBook = null;
-                    _offset = 0;
-                  });
-                  _runSearch();
-                },
+                onPressed: state.clearFilters,
               ),
             ),
         ],
@@ -287,53 +235,61 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  Widget _buildResultsCount() {
-    if (_totalHits == 0 && !_loading) return const SizedBox.shrink();
+  Widget _buildResultsCount(BuildContext context, SearchState state) {
+    if (state.totalHits == 0 && !state.loading) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Align(
         alignment: AlignmentDirectional.centerStart,
         child: Text(
-          '${_totalHits.toString()} תוצאות',
+          '${state.totalHits} תוצאות',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       ),
     );
   }
 
-  Widget _buildResultsList() {
-    if (_results.isEmpty && !_loading) {
+  Widget _buildResultsList(BuildContext context, SearchState state) {
+    if (state.results.isEmpty && !state.loading) {
+      if (state.error != null) {
+        return Center(
+          child: Text('שגיאה: ${state.error}',
+              style: const TextStyle(color: Colors.red)),
+        );
+      }
       return const Center(
         child: Text('לא נמצאו תוצאות', style: TextStyle(fontSize: 18)),
       );
     }
     return ListView.separated(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      itemCount: _results.length + (_offset + _limit < _totalHits ? 1 : 0),
+      itemCount: state.results.length +
+          (state.results.length < state.totalHits ? 1 : 0),
       separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (ctx, i) {
-        if (i == _results.length) {
+        if (i == state.results.length) {
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Center(
               child: ElevatedButton(
-                onPressed: () {
-                  _offset += _limit;
-                  _runSearch();
-                },
-                child: const Text('טען עוד'),
+                onPressed: state.loading ? null : state.loadMore,
+                child: state.loading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('טען עוד'),
               ),
             ),
           );
         }
-        return _buildResultCard(_results[i]);
+        return _buildResultCard(context, state.results[i]);
       },
     );
   }
 
-  Widget _buildResultCard(SearchResult r) {
+  Widget _buildResultCard(BuildContext context, SearchResult r) {
     final display = r.formattedContent ?? r.content;
-    // Split by highlight markers ##...##
     final spans = _buildHighlightedSpans(display);
 
     return Card(
@@ -399,7 +355,6 @@ class _SearchScreenState extends State<SearchScreen> {
     for (int i = 0; i < parts.length; i++) {
       if (parts[i].isEmpty) continue;
       if (i % 2 == 1) {
-        // Highlighted part (between ## markers)
         spans.add(
           TextSpan(
             text: parts[i],
