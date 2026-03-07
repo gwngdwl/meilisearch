@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:sqlite3/sqlite3.dart';
 import '../config/app_config.dart';
 
-const int _batchSize = 500;
+const int _batchSize = 10000;
 
 class IndexingProgress {
   final int done;
@@ -131,7 +131,7 @@ class IndexingService {
 
       // ── 3. Fetch and index in batches ────────────────────────────────────
       int done = 0;
-      int offset = 0;
+      int lastId = 0;
 
       while (true) {
         final rows = db.select('''
@@ -150,11 +150,15 @@ class IndexingService {
           JOIN category c ON b.categoryId = c.id
           LEFT JOIN book_author ba ON ba.bookId = b.id
           LEFT JOIN author a ON a.id = ba.authorId
+          WHERE l.id > ?
           GROUP BY l.id
-          LIMIT ? OFFSET ?
-        ''', [_batchSize, offset]);
+          ORDER BY l.id ASC
+          LIMIT ?
+        ''', [lastId, _batchSize]);
 
         if (rows.isEmpty) break;
+
+        lastId = rows.last['id'] as int;
 
         // Build list of document maps
         final docs = rows.map((row) {
@@ -179,12 +183,11 @@ class IndexingService {
           );
         } catch (e, st) {
           debugPrint(
-              'Failed to index batch at offset $offset (size: ${docs.length}): $e\n$st');
+              'Failed to index batch ending after lastId $lastId (size: ${docs.length}): $e\n$st');
           rethrow;
         }
 
         done += rows.length;
-        offset += _batchSize;
         yield IndexingProgress(
           done,
           total,
