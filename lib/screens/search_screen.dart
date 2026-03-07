@@ -79,8 +79,8 @@ class _SearchScreenState extends State<SearchScreen> {
         });
       }
     } catch (e, stackTrace) {
-      print('[SearchScreen] ERROR in _runSearch: $e');
-      print('[SearchScreen] Stack trace: $stackTrace');
+      debugPrint('[SearchScreen] ERROR in _runSearch: $e');
+      debugPrint('[SearchScreen] Stack trace: $stackTrace');
       if (mounted) {
         setState(() => _loading = false);
         ScaffoldMessenger.of(

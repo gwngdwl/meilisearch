@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 
 class SearchResult {
   final int id;
@@ -87,7 +88,7 @@ class SearchService {
     final client = HttpClient();
     client.autoUncompress = false; // we set Accept-Encoding: identity, no gzip
     try {
-      print(
+      debugPrint(
           '[SearchService] Sending search request: query="$query", offset=$offset, limit=$limit, filters=$filters');
       final req = await client
           .postUrl(Uri.parse('$_baseUrl/indexes/$_indexName/search'))
@@ -100,13 +101,14 @@ class SearchService {
       final responseBody = await utf8.decoder.bind(res).join();
 
       if (res.statusCode != 200) {
-        print('[SearchService] ERROR: HTTP ${res.statusCode} - $responseBody');
+        debugPrint(
+            '[SearchService] ERROR: HTTP ${res.statusCode} - $responseBody');
         throw Exception(
             'Search failed with status ${res.statusCode}: $responseBody');
       }
 
       final map = jsonDecode(responseBody) as Map<String, dynamic>;
-      print(
+      debugPrint(
           '[SearchService] Response OK: estimatedTotalHits=${map['estimatedTotalHits']}, hits=${(map['hits'] as List?)?.length ?? 0}');
 
       final hitsRaw =
@@ -127,8 +129,8 @@ class SearchService {
         facets: SearchFacets(categories: catFacet, books: bookFacet),
       );
     } catch (e, stackTrace) {
-      print('[SearchService] ERROR during search: $e');
-      print('[SearchService] Stack trace: $stackTrace');
+      debugPrint('[SearchService] ERROR during search: $e');
+      debugPrint('[SearchService] Stack trace: $stackTrace');
       rethrow;
     } finally {
       client.close(force: true);
