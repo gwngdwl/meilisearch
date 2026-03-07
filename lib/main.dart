@@ -8,6 +8,8 @@ import 'services/search_service.dart';
 import 'services/indexing_service.dart';
 import 'screens/search_screen.dart';
 import 'states/search_state.dart';
+import 'states/server_state.dart';
+import 'states/indexing_state.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,8 +35,14 @@ void main() async {
         Provider<SearchService>.value(value: searchService),
         Provider<IndexingService>.value(value: indexingService),
         ChangeNotifierProvider(
-          create: (_) =>
-              SearchState(searchService, indexingService)..checkIndexed(),
+          create: (_) => ServerState(serverService)..initialize(),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => IndexingState(indexingService),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => SearchState(searchService, indexingService, config)
+            ..checkIndexed(),
         ),
       ],
       child: const MyApp(),
@@ -50,35 +58,21 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
-  late final ServerService _server;
-  String _serverStatus = 'מאתחל שרת...';
-  bool _serverReady = false;
-
   @override
   void initState() {
     super.initState();
-    _server = context.read<ServerService>();
     WidgetsBinding.instance.addObserver(this);
-    _startServer();
-  }
-
-  Future<void> _startServer() async {
-    try {
-      await _server.start();
-      if (mounted) setState(() => _serverReady = true);
-    } catch (e) {
-      if (mounted) setState(() => _serverStatus = 'שגיאה בהפעלת השרת:\n$e');
-    }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.detached) _server.stop();
+    if (state == AppLifecycleState.detached) {
+      if (mounted) context.read<ServerState>().stop();
+    }
   }
 
   @override
   void dispose() {
-    _server.stop();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -92,20 +86,25 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
       ),
-      home: _serverReady
-          ? const SearchScreen()
-          : _SplashScreen(status: _serverStatus),
+      home: Consumer<ServerState>(
+        builder: (context, state, child) {
+          if (state.isReady) {
+            return const SearchScreen();
+          }
+          return _SplashScreen(status: state.status, isError: state.hasError);
+        },
+      ),
     );
   }
 }
 
 class _SplashScreen extends StatelessWidget {
   final String status;
-  const _SplashScreen({required this.status});
+  final bool isError;
+  const _SplashScreen({required this.status, this.isError = false});
 
   @override
   Widget build(BuildContext context) {
-    final isError = status.startsWith('שגיאה');
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(

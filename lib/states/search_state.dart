@@ -1,13 +1,16 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import '../services/search_service.dart';
 import '../services/indexing_service.dart';
+import '../config/app_config.dart';
 
 class SearchState extends ChangeNotifier {
   final SearchService _searchService;
   final IndexingService _indexingService;
+  final AppConfig _appConfig;
 
-  SearchState(this._searchService, this._indexingService);
+  SearchState(this._searchService, this._indexingService, this._appConfig);
 
   final TextEditingController queryController = TextEditingController();
   Timer? _debounce;
@@ -52,6 +55,21 @@ class SearchState extends ChangeNotifier {
     _checkingIndex = false;
     notifyListeners();
     if (_indexed) runSearch();
+  }
+
+  Future<String?> pickDatabase() async {
+    final result = await FilePicker.platform.pickFiles(
+      dialogTitle: 'בחר קובץ מסד נתונים (seforim.db)',
+      type: FileType.custom,
+      allowedExtensions: ['db', 'sqlite', 'sqlite3'],
+    );
+    if (result != null && result.files.single.path != null) {
+      final path = result.files.single.path!;
+      await _appConfig.setDbPath(path);
+      checkIndexed();
+      return path;
+    }
+    return null;
   }
 
   void onQueryChanged(String value) {

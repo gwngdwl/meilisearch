@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:file_picker/file_picker.dart';
 import '../states/search_state.dart';
 import '../config/app_config.dart';
 import '../services/search_service.dart';
@@ -22,23 +21,12 @@ class SearchScreen extends StatelessWidget {
   }
 
   Future<void> _pickDatabase(BuildContext context) async {
-    final result = await FilePicker.platform.pickFiles(
-      dialogTitle: 'בחר קובץ מסד נתונים (seforim.db)',
-      type: FileType.custom,
-      allowedExtensions: ['db', 'sqlite', 'sqlite3'],
-    );
-    if (!context.mounted) return;
-    if (result != null && result.files.single.path != null) {
-      final path = result.files.single.path!;
-      final config = context.read<AppConfig>();
-      await config.setDbPath(path);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('נתיב מסד הנתונים עודכן: $path')),
-        );
-        // After db update, let's re-check indexing.
-        context.read<SearchState>().checkIndexed();
-      }
+    final state = context.read<SearchState>();
+    final path = await state.pickDatabase();
+    if (path != null && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('נתיב מסד הנתונים עודכן: $path')),
+      );
     }
   }
 
