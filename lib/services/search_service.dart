@@ -65,8 +65,8 @@ class SearchService {
     String query, {
     String? categoryTitle,
     String? bookTitle,
-    int limit = 20,
-    int offset = 0,
+    int? limit,
+    int? offset,
   }) async {
     final filters = <String>[];
     if (categoryTitle != null && categoryTitle.isNotEmpty) {
@@ -78,8 +78,8 @@ class SearchService {
 
     final body = jsonEncode({
       'q': query,
-      'limit': limit,
-      'offset': offset,
+      if (limit != null) 'limit': limit,
+      if (offset != null) 'offset': offset,
       if (filters.isNotEmpty) 'filter': filters,
       'facets': ['categoryTitle', 'bookTitle'],
       'attributesToHighlight': ['content'],
@@ -89,7 +89,7 @@ class SearchService {
 
     try {
       debugPrint(
-          '[SearchService] Sending search request: query="$query", offset=$offset, limit=$limit, filters=$filters');
+          '[SearchService] Sending search request: query="$query", offset=${offset ?? 'default'}, limit=${limit ?? 'default'}, filters=$filters');
       final req = await _client
           .postUrl(Uri.parse(
               '${AppConfig.meiliUrl}/indexes/${AppConfig.indexName}/search'))

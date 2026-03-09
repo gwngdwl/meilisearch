@@ -42,8 +42,9 @@ class SearchState extends ChangeNotifier {
   Map<String, int> _bookFacets = {};
   Map<String, int> get bookFacets => _bookFacets;
 
-  int _offset = 0;
-  static const int limit = 20;
+  static const int _searchChunkSize = 1000;
+  int _searchVersion = 0;
+  bool _searchSettingsEnsured = false;
 
   String? _error;
   String? get error => _error;
@@ -75,7 +76,6 @@ class SearchState extends ChangeNotifier {
   void onQueryChanged(String value) {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 350), () {
-      _offset = 0;
       runSearch();
     });
   }
@@ -91,14 +91,12 @@ class SearchState extends ChangeNotifier {
   void selectCategory(String? category) {
     _selectedCategory = category;
     _selectedBook = null;
-    _offset = 0;
     notifyListeners();
     runSearch();
   }
 
   void selectBook(String? book) {
     _selectedBook = book;
-    _offset = 0;
     notifyListeners();
     runSearch();
   }
@@ -106,44 +104,81 @@ class SearchState extends ChangeNotifier {
   void clearFilters() {
     _selectedCategory = null;
     _selectedBook = null;
-    _offset = 0;
     notifyListeners();
     runSearch();
   }
 
   void clearQuery() {
     queryController.clear();
-    _offset = 0;
     notifyListeners();
-    runSearch();
-  }
-
-  void loadMore() {
-    _offset += limit;
     runSearch();
   }
 
   Future<void> runSearch() async {
     if (!_indexed) return;
+    final searchVersion = ++_searchVersion;
     _loading = true;
     _error = null;
+    _results = [];
+    _totalHits = 0;
+    _categoryFacets = {};
+    _bookFacets = {};
     notifyListeners();
     try {
-      final response = await _searchService.search(
-        queryController.text,
-        categoryTitle: _selectedCategory,
-        bookTitle: _selectedBook,
-        limit: limit,
-        offset: _offset,
-      );
+      if (!_searchSettingsEnsured) {
+        await _indexingService.ensureSearchSettings();
+        if (searchVersion != _searchVersion) return;
+        _searchSettingsEnsured = true;
+      }
 
-      _results = _offset == 0 ? response.hits : [..._results, ...response.hits];
-      _totalHits = response.totalHits;
-      _categoryFacets = response.facets.categories;
-      _bookFacets = response.facets.books;
+      final query = queryController.text;
+      final selectedCategory = _selectedCategory;
+      final selectedBook = _selectedBook;
+      var offset = 0;
+      var totalHits = 0;
+      final allHits = <SearchResult>[];
+      Map<String, int> categoryFacets = {};
+      Map<String, int> bookFacets = {};
+
+      while (true) {
+        final response = await _searchService.search(
+          query,
+          categoryTitle: selectedCategory,
+          bookTitle: selectedBook,
+          limit: _searchChunkSize,
+          offset: offset,
+        );
+        if (searchVersion != _searchVersion) return;
+
+        if (offset == 0) {
+          totalHits = response.totalHits;
+          categoryFacets = response.facets.categories;
+          bookFacets = response.facets.books;
+        }
+
+        if (response.hits.isEmpty) break;
+
+        allHits.addAll(response.hits);
+        _results = List<SearchResult>.unmodifiable(allHits);
+        _totalHits = totalHits > allHits.length ? totalHits : allHits.length;
+        _categoryFacets = categoryFacets;
+        _bookFacets = bookFacets;
+        notifyListeners();
+
+        offset += response.hits.length;
+        if (response.hits.length < _searchChunkSize) break;
+      }
+
+      if (searchVersion != _searchVersion) return;
+
+      _results = List<SearchResult>.unmodifiable(allHits);
+      _totalHits = totalHits > allHits.length ? totalHits : allHits.length;
+      _categoryFacets = categoryFacets;
+      _bookFacets = bookFacets;
       _loading = false;
       notifyListeners();
     } catch (e) {
+      if (searchVersion != _searchVersion) return;
       _loading = false;
       _error = e.toString();
       notifyListeners();

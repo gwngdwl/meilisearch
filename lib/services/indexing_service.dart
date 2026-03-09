@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,6 +7,8 @@ import 'package:sqlite3/sqlite3.dart';
 import '../config/app_config.dart';
 
 const int _batchSize = 10000;
+const int _maxValuesPerFacet = 1000000;
+const int _maxTotalHits = 1000000;
 
 class IndexingProgress {
   final int done;
@@ -77,6 +80,52 @@ class IndexingService {
     }
   }
 
+  Future<void> _waitForTask(int taskUid) async {
+    final deadline = DateTime.now().add(const Duration(minutes: 2));
+    while (DateTime.now().isBefore(deadline)) {
+      final task = await _meiliRequest('GET', '/tasks/$taskUid');
+      final status = task['status'] as String? ?? '';
+      if (status == 'succeeded') return;
+      if (status == 'failed' || status == 'canceled') {
+        throw Exception(
+            'Meilisearch task $taskUid ended with status $status: ${task['error'] ?? task}');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+
+    throw TimeoutException('Timed out waiting for Meilisearch task $taskUid');
+  }
+
+  Future<void> ensureSearchSettings() async {
+    var needsUpdate = true;
+    try {
+      final settings =
+          await _meiliRequest('GET', '/indexes/${AppConfig.indexName}/settings');
+      final faceting =
+          (settings['faceting'] as Map<String, dynamic>?) ?? const {};
+      final pagination =
+          (settings['pagination'] as Map<String, dynamic>?) ?? const {};
+      needsUpdate = faceting['maxValuesPerFacet'] != _maxValuesPerFacet ||
+          pagination['maxTotalHits'] != _maxTotalHits;
+    } on HttpException catch (e) {
+      if (!e.message.contains('[404]')) rethrow;
+    }
+
+    if (!needsUpdate) return;
+
+    final response =
+        await _meiliRequest('PATCH', '/indexes/${AppConfig.indexName}/settings',
+            body: {
+          'faceting': {'maxValuesPerFacet': _maxValuesPerFacet},
+          'pagination': {'maxTotalHits': _maxTotalHits},
+        });
+
+    final taskUid = (response['taskUid'] as num?)?.toInt();
+    if (taskUid != null) {
+      await _waitForTask(taskUid);
+    }
+  }
+
   /// Streams progress events while indexing seforim.db into Meilisearch.
   Stream<IndexingProgress> buildIndex() async* {
     // ── 1. Configure index settings ──────────────────────────────────────
@@ -103,6 +152,8 @@ class IndexingService {
               'categoryTitle',
               'authors',
             ],
+            'faceting': {'maxValuesPerFacet': _maxValuesPerFacet},
+            'pagination': {'maxTotalHits': _maxTotalHits},
           });
     } on HttpException catch (e) {
       if (!e.message.contains('[404]')) {

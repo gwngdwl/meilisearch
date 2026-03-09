@@ -238,6 +238,10 @@ class SearchScreen extends StatelessWidget {
   }
 
   Widget _buildResultsList(BuildContext context, SearchState state) {
+    if (state.results.isEmpty && state.loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     if (state.results.isEmpty && !state.loading) {
       if (state.error != null) {
         return Center(
@@ -251,22 +255,17 @@ class SearchScreen extends StatelessWidget {
     }
     return ListView.separated(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      itemCount: state.results.length +
-          (state.results.length < state.totalHits ? 1 : 0),
+      itemCount: state.results.length + (state.loading ? 1 : 0),
       separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (ctx, i) {
         if (i == state.results.length) {
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Center(
-              child: ElevatedButton(
-                onPressed: state.loading ? null : state.loadMore,
-                child: state.loading
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('טען עוד'),
+              child: const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
               ),
             ),
           );
