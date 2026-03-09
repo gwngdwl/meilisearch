@@ -117,6 +117,11 @@ class SearchState extends ChangeNotifier {
   Future<void> runSearch() async {
     if (!_indexed) return;
     final searchVersion = ++_searchVersion;
+    final query = queryController.text.trim();
+    final hasCategoryFilter =
+        _selectedCategory != null && _selectedCategory!.isNotEmpty;
+    final hasBookFilter = _selectedBook != null && _selectedBook!.isNotEmpty;
+
     _loading = true;
     _error = null;
     _results = [];
@@ -124,6 +129,13 @@ class SearchState extends ChangeNotifier {
     _categoryFacets = {};
     _bookFacets = {};
     notifyListeners();
+
+    if (query.isEmpty && !hasCategoryFilter && !hasBookFilter) {
+      _loading = false;
+      notifyListeners();
+      return;
+    }
+
     try {
       if (!_searchSettingsEnsured) {
         await _indexingService.ensureSearchSettings();
@@ -131,7 +143,6 @@ class SearchState extends ChangeNotifier {
         _searchSettingsEnsured = true;
       }
 
-      final query = queryController.text;
       final selectedCategory = _selectedCategory;
       final selectedBook = _selectedBook;
       var offset = 0;
