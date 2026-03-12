@@ -133,12 +133,10 @@ class IndexingService {
     try {
       await _meiliRequest('PATCH', '/indexes/${AppConfig.indexName}/settings',
           body: {
-            'searchableAttributes': ['content', 'heRef', 'bookTitle'],
+            'searchableAttributes': ['content', 'heRef'],
             'filterableAttributes': [
               'categoryId',
-              'categoryTitle',
               'bookId',
-              'bookTitle',
             ],
             'sortableAttributes': ['bookId', 'lineIndex'],
             'displayedAttributes': [
@@ -147,10 +145,10 @@ class IndexingService {
               'heRef',
               'lineIndex',
               'bookId',
-              'bookTitle',
               'categoryId',
-              'categoryTitle',
-              'authors',
+            ],
+            'stopWords': [
+              'של', 'את', 'על', 'אל', 'מן', 'כל', 'עם', 'גם', 'זה', 'לא', 'כן', 'או', 'רק', 'אך', 'אלא', 'אם', 'הוא', 'היא', 'הם', 'הן', 'אשר', 'כי', 'עד', 'בין', 'כמו', 'אני', 'אתה', 'אנחנו', 'אתם', 'אף', 'כדי', 'מה', 'מי', 'יש', 'אין'
             ],
             'faceting': {'maxValuesPerFacet': _maxValuesPerFacet},
             'pagination': {'maxTotalHits': _maxTotalHits},
@@ -192,17 +190,10 @@ class IndexingService {
               l.heRef       AS heRef,
               l.lineIndex   AS lineIndex,
               b.id          AS bookId,
-              b.title       AS bookTitle,
-              c.id          AS categoryId,
-              c.title       AS categoryTitle,
-              GROUP_CONCAT(a.name, ', ') AS authors
+              b.categoryId  AS categoryId
           FROM line l
           JOIN book b ON l.bookId = b.id
-          JOIN category c ON b.categoryId = c.id
-          LEFT JOIN book_author ba ON ba.bookId = b.id
-          LEFT JOIN author a ON a.id = ba.authorId
           WHERE l.id > ?
-          GROUP BY l.id
           ORDER BY l.id ASC
           LIMIT ?
         ''', [lastId, _batchSize]);
@@ -219,10 +210,7 @@ class IndexingService {
             'heRef': row['heRef'],
             'lineIndex': row['lineIndex'],
             'bookId': row['bookId'],
-            'bookTitle': row['bookTitle'],
             'categoryId': row['categoryId'],
-            'categoryTitle': row['categoryTitle'],
-            'authors': row['authors'],
           };
         }).toList();
 

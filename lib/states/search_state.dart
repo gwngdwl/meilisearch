@@ -3,12 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/search_service.dart';
 import '../services/indexing_service.dart';
+import '../services/metadata_service.dart';
 import '../config/app_config.dart';
 
 class SearchState extends ChangeNotifier {
   final SearchService _searchService;
   final IndexingService _indexingService;
   final AppConfig _appConfig;
+  final MetadataService _metadataService = MetadataService();
 
   SearchState(this._searchService, this._indexingService, this._appConfig);
 
@@ -52,6 +54,10 @@ class SearchState extends ChangeNotifier {
   void checkIndexed() async {
     _checkingIndex = true;
     notifyListeners();
+    final dbPath = _appConfig.dbPath;
+    if (dbPath != null) {
+      await _metadataService.load(dbPath);
+    }
     _indexed = await _indexingService.isIndexed();
     _checkingIndex = false;
     notifyListeners();
@@ -143,8 +149,19 @@ class SearchState extends ChangeNotifier {
         _searchSettingsEnsured = true;
       }
 
-      final selectedCategory = _selectedCategory;
-      final selectedBook = _selectedBook;
+      final int? categoryId = _selectedCategory != null
+          ? _metadataService.categories.entries
+              .where((e) => e.value == _selectedCategory)
+              .map((e) => e.key)
+              .firstOrNull
+          : null;
+      final int? bookId = _selectedBook != null
+          ? _metadataService.books.entries
+              .where((e) => e.value.title == _selectedBook)
+              .map((e) => e.key)
+              .firstOrNull
+          : null;
+
       var offset = 0;
       var totalHits = 0;
       final allHits = <SearchResult>[];
@@ -154,8 +171,9 @@ class SearchState extends ChangeNotifier {
       while (true) {
         final response = await _searchService.search(
           query,
-          categoryTitle: selectedCategory,
-          bookTitle: selectedBook,
+          _metadataService,
+          categoryId: categoryId,
+          bookId: bookId,
           limit: _searchChunkSize,
           offset: offset,
         );

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../config/app_config.dart';
+import 'metadata_service.dart';
 
 class SearchResult {
   final int id;
@@ -26,17 +27,23 @@ class SearchResult {
     this.formattedContent,
   });
 
-  factory SearchResult.fromMap(Map<String, dynamic> m) {
+  factory SearchResult.fromMap(
+      Map<String, dynamic> m, MetadataService metadata) {
     final formatted = m['_formatted'] as Map<String, dynamic>?;
+    final bookId = (m['bookId'] as num?)?.toInt() ?? 0;
+    final categoryId = (m['categoryId'] as num?)?.toInt() ?? 0;
+
+    final bookMeta = metadata.getBook(bookId);
+
     return SearchResult(
       id: (m['id'] as num).toInt(),
       content: m['content'] as String? ?? '',
       heRef: m['heRef'] as String? ?? '',
-      bookId: (m['bookId'] as num?)?.toInt() ?? 0,
-      bookTitle: m['bookTitle'] as String? ?? '',
-      categoryId: (m['categoryId'] as num?)?.toInt() ?? 0,
-      categoryTitle: m['categoryTitle'] as String? ?? '',
-      authors: m['authors'] as String?,
+      bookId: bookId,
+      bookTitle: bookMeta?.title ?? '',
+      categoryId: categoryId,
+      categoryTitle: metadata.getCategory(categoryId) ?? '',
+      authors: bookMeta?.authors ?? '',
       formattedContent: formatted?['content'] as String?,
     );
   }
@@ -62,18 +69,19 @@ class SearchService {
   SearchService();
 
   Future<SearchResponse> search(
-    String query, {
-    String? categoryTitle,
-    String? bookTitle,
+    String query,
+    MetadataService metadata, {
+    int? categoryId,
+    int? bookId,
     int? limit,
     int? offset,
   }) async {
     final filters = <String>[];
-    if (categoryTitle != null && categoryTitle.isNotEmpty) {
-      filters.add('categoryTitle = "${categoryTitle.replaceAll('"', '\\"')}"');
+    if (categoryId != null) {
+      filters.add('categoryId = $categoryId');
     }
-    if (bookTitle != null && bookTitle.isNotEmpty) {
-      filters.add('bookTitle = "${bookTitle.replaceAll('"', '\\"')}"');
+    if (bookId != null) {
+      filters.add('bookId = $bookId');
     }
 
     final body = jsonEncode({
@@ -81,7 +89,7 @@ class SearchService {
       if (limit != null) 'limit': limit,
       if (offset != null) 'offset': offset,
       if (filters.isNotEmpty) 'filter': filters,
-      'facets': ['categoryTitle', 'bookTitle'],
+      'facets': ['categoryId', 'bookId'],
       'attributesToHighlight': ['content'],
       'highlightPreTag': '##',
       'highlightPostTag': '##',
@@ -89,7 +97,7 @@ class SearchService {
 
     try {
       debugPrint(
-          '[SearchService] Sending search request: query="$query", offset=${offset ?? 'default'}, limit=${limit ?? 'default'}, filters=$filters');
+          '[SearchService] Sending search request: query="$query", offset=${offset ?? "default"}, limit=${limit ?? "default"}, filters=$filters');
       final req = await _client
           .postUrl(Uri.parse(
               '${AppConfig.meiliUrl}/indexes/${AppConfig.indexName}/search'))
@@ -110,19 +118,40 @@ class SearchService {
 
       final map = jsonDecode(responseBody) as Map<String, dynamic>;
       debugPrint(
-          '[SearchService] Response OK: estimatedTotalHits=${map['estimatedTotalHits']}, hits=${(map['hits'] as List?)?.length ?? 0}');
+          '[SearchService] Response OK: estimatedTotalHits=${map["estimatedTotalHits"]}, hits=${(map["hits"] as List?)?.length ?? 0}');
 
       final hitsRaw =
           (map['hits'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-      final hits = hitsRaw.map(SearchResult.fromMap).toList();
+      final hits =
+          hitsRaw.map((m) => SearchResult.fromMap(m, metadata)).toList();
 
       final facetDist = map['facetDistribution'] as Map<String, dynamic>? ?? {};
-      final catFacet = (facetDist['categoryTitle'] as Map<String, dynamic>?)
+      final catFacetRaw = (facetDist['categoryId'] as Map<String, dynamic>?)
               ?.cast<String, int>() ??
           {};
-      final bookFacet = (facetDist['bookTitle'] as Map<String, dynamic>?)
-              ?.cast<String, int>() ??
-          {};
+      final bookFacetRaw =
+          (facetDist['bookId'] as Map<String, dynamic>?)?.cast<String, int>() ??
+              {};
+
+      final Map<String, int> catFacet = {};
+      for (final e in catFacetRaw.entries) {
+        final id = int.tryParse(e.key);
+        if (id != null) {
+          final title = metadata.getCategory(id);
+          if (title != null) catFacet[title] = (catFacet[title] ?? 0) + e.value;
+        }
+      }
+
+      final Map<String, int> bookFacet = {};
+      for (final e in bookFacetRaw.entries) {
+        final id = int.tryParse(e.key);
+        if (id != null) {
+          final title = metadata.getBook(id)?.title;
+          if (title != null) {
+            bookFacet[title] = (bookFacet[title] ?? 0) + e.value;
+          }
+        }
+      }
 
       return SearchResponse(
         hits: hits,
